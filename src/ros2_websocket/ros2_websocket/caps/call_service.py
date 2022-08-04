@@ -57,7 +57,7 @@ class CallService(Cap):
         (True, "service", str),
         (False, "fragment_size", (int, type(None))),
         (False, "compression", str),
-        (False, "timeout", float),
+        (False, "timeout", (float,int)),
     ]
 
     def __init__(self, client: Client):
@@ -116,13 +116,13 @@ class CallService(Cap):
         args_to_service_request_instance(service, inst, args)
 
         client = self.client.node.create_client(service_class, service)
-        try:
-            fut = client.call_async()
+        fut = client.call_async(inst)
 
+        try:
             if timeout >= 0:
                 try:
                     await asyncio.wait_for(fut, timeout)
-                except TimeoutError:
+                except Exception:
                     client.remove_pending_request(fut)
                     raise ServiceCallTimeoutException(service, timeout)
             else:

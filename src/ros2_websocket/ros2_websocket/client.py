@@ -1,8 +1,9 @@
 import asyncio
 import json
+import signal
+from uuid import uuid4
 from websockets import WebSocketServerProtocol
-from rclpy import Node
-from ros2_websocket.caps.call_service import CallService
+from rclpy.node import Node
 
 
 def is_number(s):
@@ -15,30 +16,18 @@ def is_number(s):
 
 class Client:
 
-    supported_capabilities = [
-        CallService,
-        # Advertise,
-        # Publish,
-        # Subscribe,
-        # Defragment,
-        # AdvertiseService,
-        # ServiceResponse,
-        # UnadvertiseService,
-    ]
-
-    def __init__(self, node: Node, id: str, conn: WebSocketServerProtocol):
+    def __init__(self, node: Node, conn: WebSocketServerProtocol, caps):
         self.node = node
         self.logger = node.get_logger()
-        self.id = id
+        self.id = str(uuid4())
         self.capabilities = []
         self.operations = {}
+        self.event_loop = asyncio.get_event_loop()
 
-        for capability_class in self.supported_capabilities:
+        for capability_class in caps:
             self.add_capability(capability_class)
 
         self._conn = conn
-
-        asyncio.create_task(self._receive())
 
     def register_operation(self, opcode: str, handler):
         """Register a handler for an opcode
@@ -65,15 +54,24 @@ class Client:
         """
         self.capabilities.append(capability_class(self))
 
-    async def _receive(self):
-        async for msg in self._conn:
-            try:
-                req = json.loads(msg)
-            except Exception as err:
-                self.log_warn(f"[{id}] Unable to decode message: {str(err)}.")
-                continue
+    async def run(self):
+        self.log_warn("Connection established.")
 
-            asyncio.create_task(self._process_request(req))
+        try:
+            async for msg in self._conn:
+                try:
+                    req = json.loads(msg)
+                except Exception as err:
+                    self.log_warn(f"Unable to decode message: {str(err)}.")
+                    continue
+
+                asyncio.create_task(self._process_request(req))
+
+            self.log(f"Connection closed gracefully.")
+        except Exception as err:
+            self.log_warn(f"Connection closed unexpectedly: {str(err)}.")
+        finally:
+            await self.dispose()
 
     async def send(self, msg):
         await self._conn.send(json.dumps(msg).encode('utf-8'))
@@ -114,6 +112,13 @@ class Client:
             await self.operations[op](msg)
         except Exception as exc:
             self.log_error(f"{op}: {str(exc)}", mid)
+
+    async def dispose(self):
+        for cap in self.capabilities:
+            await cap.dispose()
+
+        self.capabilities.clear()
+        self.operations.clear()
 
     def log_error(self, message, lid=None):
         self.log("error", message, lid)

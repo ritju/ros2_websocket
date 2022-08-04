@@ -2,7 +2,7 @@ import asyncio
 import json
 import uuid
 
-from rclpy import Node
+from rclpy.node import Node
 from rclpy.clock import ROSClock
 from websockets import WebSocketServerProtocol
 

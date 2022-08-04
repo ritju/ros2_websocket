@@ -1,5 +1,7 @@
 import importlib
 
+from numpy import typename
+
 """ ros_loader contains methods for dynamically loading ROS message classes at
 runtime.  It's achieved by using roslib to load the manifest files for the
 package that the respective class is contained in.
@@ -73,13 +75,19 @@ def _get_msg_class(typestring):
         # class and contains module subnames in between. For
         # compatibility with ROS1 style types, we fall back to use a
         # standard "msg" subname.
+        is_action_message = _is_action_msg(typestring)
+
         splits = [x for x in typestring.split("/") if x]
         if len(splits) > 2:
             subname = ".".join(splits[1:-1])
         else:
-            subname = "msg"
+            subname = "action" if is_action_message else "msg"
 
-        return _get_class(typestring, subname, _loaded_msgs)
+        if is_action_message:
+            return _get_action_msg_class(typestring, subname, _loaded_msgs)
+        else:
+            return _get_class(typestring, subname, _loaded_msgs)
+
     except (InvalidModuleException, InvalidClassException):
         return _get_class(typestring, "msg", _loaded_msgs)
 
@@ -94,13 +102,19 @@ def _get_srv_class(typestring):
         # class and contains module subnames in between. For
         # compatibility with ROS1 style types, we fall back to use a
         # standard "srv" subname.
+        is_action_service = _is_action_service(typestring)
+
         splits = [x for x in typestring.split("/") if x]
         if len(splits) > 2:
             subname = ".".join(splits[1:-1])
         else:
-            subname = "srv"
+            subname = 'action' if is_action_service else "srv"
 
-        return _get_class(typestring, subname, _loaded_srvs)
+        if is_action_service:
+            return _get_action_service_class(typestring, subname, _loaded_srvs)
+        else:
+            return _get_class(typestring, subname, _loaded_srvs)
+
     except (InvalidModuleException, InvalidClassException):
         return _get_class(typestring, "srv", _loaded_srvs)
 
@@ -178,3 +192,67 @@ def _get_from_cache(cache, key):
     if key in cache:
         ret = cache[key]
     return ret
+
+def _is_action_service(name: str):
+    return name.endswith('_SendGoal') or name.endswith('_GetResult') or name.endswith('_CancelGoal')
+
+def _get_action_service_class(typestring: str, subname: str, cache):
+    cls = _get_from_cache(cache, typestring)
+    if cls is not None:
+        return cls
+
+    parts = typestring.split("/")
+    action = parts[-1].split('_')
+    
+    actionName = action[0]
+    operationName = action[1]
+    modname = parts[0]
+
+    norm_typestring = modname + "/" + actionName + "_" + operationName
+
+    # Check to see if the normalized type string is cached
+    cls = _get_from_cache(cache, norm_typestring)
+    if cls is not None:
+        return cls
+
+    # Load the class
+    actionCls = _load_class(modname, subname, actionName)
+    cls = getattr(actionCls.Impl, f'{operationName}Service')
+
+    # Cache the class for both the regular and normalized typestring
+    _add_to_cache(cache, typestring, cls)
+    _add_to_cache(cache, norm_typestring, cls)
+
+    return cls
+
+def _is_action_msg(name: str):
+    return name.endswith('_Goal') or name.endswith('_Result') or name.endswith('_FeedbackMessage')
+
+def _get_action_msg_class(typestring: str, subname: str, cache):
+    cls = _get_from_cache(cache, typestring)
+    if cls is not None:
+        return cls
+
+    parts = typestring.split("/")
+    action = parts[-1].split('_')
+    
+    actionName = action[0]
+    typeName = 'Feedback' if action[1] == 'FeedbackMessage' else action[1]
+    modname = parts[0]
+
+    norm_typestring = modname + "/" + actionName + "_" + typeName
+
+    # Check to see if the normalized type string is cached
+    cls = _get_from_cache(cache, norm_typestring)
+    if cls is not None:
+        return cls
+
+    # Load the class
+    actionCls = _load_class(modname, subname, actionName)
+    cls = getattr(actionCls, typeName)
+
+    # Cache the class for both the regular and normalized typestring
+    _add_to_cache(cache, typestring, cls)
+    _add_to_cache(cache, norm_typestring, cls)
+
+    return cls

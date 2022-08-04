@@ -11,6 +11,7 @@
       "request": "launch",
       "program": "${file}",
       "console": "integratedTerminal",
+      "justMyCode": false
     },
     // Example gdb launch of a ros executable
     {
