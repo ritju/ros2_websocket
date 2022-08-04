@@ -16,10 +16,10 @@ def is_number(s):
 
 class Client:
 
-    def __init__(self, node: Node, conn: WebSocketServerProtocol, caps):
+    def __init__(self, id: str, node: Node, conn: WebSocketServerProtocol, caps):
         self.node = node
         self.logger = node.get_logger()
-        self.id = str(uuid4())
+        self.id = id
         self.capabilities = []
         self.operations = {}
         self.event_loop = asyncio.get_event_loop()
