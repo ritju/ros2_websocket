@@ -132,7 +132,8 @@ def msg_class_type_repr(msg_class):
     # (e.g. <class 'std_msgs.msg._string.String'>).
     # This has to be converted to {package}/msg/{Message} (e.g. std_msgs/msg/String).
     class_repr = str(msg_class).split("'")[1].split(".")
-    return f"{class_repr[0]}/{class_repr[1]}/{class_repr[3]}"
+
+    return _normalize_if_action_msg(f"{class_repr[0]}/{class_repr[1]}/{class_repr[3]}")
 
 
 def _from_inst(inst, rostype):
@@ -334,3 +335,10 @@ def _to_object_inst(msg, rostype, roottype, inst, stack):
         setattr(inst, field_name, field_value)
 
     return inst
+
+def _normalize_if_action_msg(typestring:str):
+    if typestring.endswith("_Feedback"):
+        parts = typestring.split("_")
+        parts[-1] = "FeedbackMessage"
+        return "_".join(parts)
+    return typestring

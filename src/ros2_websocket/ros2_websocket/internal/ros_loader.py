@@ -256,3 +256,4 @@ def _get_action_msg_class(typestring: str, subname: str, cache):
     _add_to_cache(cache, norm_typestring, cls)
 
     return cls
+    

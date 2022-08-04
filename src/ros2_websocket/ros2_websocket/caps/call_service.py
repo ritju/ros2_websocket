@@ -55,6 +55,7 @@ def extract_id(service, cid):
 class CallService(Cap):
     call_service_msg_fields = [
         (True, "service", str),
+        (False, "type", (str,type(None))),
         (False, "fragment_size", (int, type(None))),
         (False, "compression", str),
         (False, "timeout", (float,int)),
@@ -76,6 +77,7 @@ class CallService(Cap):
 
         # Extract the args
         service = message["service"]
+        type = message.get("type", None)
         timeout = message.get("timeout", 60.0)
         fragment_size = message.get("fragment_size", None)
         compression = message.get("compression", "none")
@@ -85,29 +87,30 @@ class CallService(Cap):
         cid = extract_id(service, cid)
 
         try:
-            response = await self._invoke(service, args, timeout)
+            response = await self._invoke(service,type, args, timeout)
         except Exception as err:
             await self._failure(cid, service, err)
             return
 
         await self._success(cid, service, response)
 
-    async def _invoke(self, service: str, args: list, timeout: int):
+    async def _invoke(self, service: str, service_type:str, args: list, timeout: int):
         # Given the service name, fetch the type and class of the service,
         # and a request instance
 
-        # This should be equivalent to rospy.resolve_name.
-        service = expand_topic_name(service, self.client.node.get_name(),
-                                    self.client.node.get_namespace())
-
-        service_names_and_types = dict(self.client.node.get_service_names_and_types())
-        service_type = service_names_and_types.get(service)
         if service_type is None:
-            raise InvalidServiceException(service)
-        # service_type is a tuple of types at this point; only one type is supported.
-        if len(service_type) > 1:
-            self.client.log_warn(f"More than one service type detected: {service_type}")
-        service_type = service_type[0]
+            # This should be equivalent to rospy.resolve_name.
+            service = expand_topic_name(service, self.client.node.get_name(),
+                                        self.client.node.get_namespace())
+
+            service_names_and_types = dict(self.client.node.get_service_names_and_types())
+            service_type = service_names_and_types.get(service)
+            if service_type is None:
+                raise InvalidServiceException(service)
+            # service_type is a tuple of types at this point; only one type is supported.
+            if len(service_type) > 1:
+                self.client.log_warn(f"More than one service type detected: {service_type}")
+            service_type = service_type[0]
 
         service_class = get_service_class(service_type)
         inst = get_service_request_instance(service_type)
@@ -137,7 +140,7 @@ class CallService(Cap):
 
             return json_response
         finally:
-            client.destroy()
+            self.client.node.destroy_client(client)
 
     async def _success(self, cid, service, message):
         outgoing_message = {
