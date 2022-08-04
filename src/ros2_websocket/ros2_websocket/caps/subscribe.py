@@ -8,29 +8,11 @@ from ros2_websocket.client import Client
 from ros2_websocket.internal.message_conversion import extract_values, msg_class_type_repr
 import ros2_websocket.internal.ros_loader as ros_loader
 
-class TopicNotEstablishedException(Exception):
-    def __init__(self, topic):
-        Exception.__init__(
-            self,
-            "Cannot infer topic type for topic %s as it is not yet advertised" % (topic,),
-        )
-
-
-class TypeConflictException(Exception):
-    def __init__(self, topic, orig_type, new_type):
-        Exception.__init__(
-            self,
-            (
-                "Tried to register topic %s with type %s but it is already"
-                + " established with type %s"
-            )
-            % (topic, new_type, orig_type),
-        )
 
 class SubscriptionInfo:
-    def __init__(self, client:Client, cb, 
-     sid:str, topic:str, msg_type, throttle_rate: int,
-     queue_size: int, durability: int, reliability:int ) -> None:
+    def __init__(self, client: Client, cb,
+                 sid: str, topic: str, msg_type, throttle_rate: int,
+                 queue_size: int, durability: int, reliability: int) -> None:
         topics_names_and_types = dict(client.node.get_topic_names_and_types())
         topic_type = topics_names_and_types.get(topic)
 
@@ -78,17 +60,19 @@ class SubscriptionInfo:
             qos.durability = durability
         if reliability != None:
             qos.reliability = reliability
-    
+
         self.id = sid
         self.topic = topic
         self.throttle_rate = throttle_rate / 1000.0
         self.last_send_time = time()
 
         self._client = client
-        self._handle = client.node.create_subscription(msg_class, topic, partial(cb, self) , qos_profile = qos)
+        self._handle = client.node.create_subscription(
+            msg_class, topic, partial(cb, self), qos_profile=qos)
 
     def dispose(self):
         self._client.node.destroy_subscription(self._handle)
+
 
 class Subscribe(Cap):
     subscribe_msg_fields = [
@@ -97,14 +81,14 @@ class Subscribe(Cap):
         (False, "type", str),
         (False, "throttle_rate", int),
         (False, "fragment_size", int),
-        (False, "queue_length", int),
-        (False, "qos_reliability", (int,type(None))),
-        (False, "qos_durability", (int,type(None))),
+        (False, "depth", int),
+        (False, "qos_reliability", (int, type(None))),
+        (False, "qos_durability", (int, type(None))),
         (False, "compression", str),
     ]
     unsubscribe_msg_fields = [(True, "id", str)]
 
-    def __init__(self, client : Client):
+    def __init__(self, client: Client):
         # Call superclass constructor
         Cap.__init__(self, client)
 
@@ -128,7 +112,7 @@ class Subscribe(Cap):
         }
 
         self.client.event_loop.call_soon_threadsafe(lambda:
-            asyncio.create_task(self._send_to_client(info.id,json)))
+                                                    asyncio.create_task(self._send_to_client(info.id, json)))
 
     async def _send_to_client(self, sid, json):
         try:
@@ -136,7 +120,7 @@ class Subscribe(Cap):
         except Exception as err:
             self.client.log_warn(f'Unable to send topic message to client: {str(err)}', sid)
 
-    async def subscribe(self,msg):
+    async def subscribe(self, msg):
         # Check the args
         self.basic_type_check(msg, self.subscribe_msg_fields)
 
@@ -149,13 +133,13 @@ class Subscribe(Cap):
         msg_type = msg.get("type", None)
         throttle_rate = msg.get("throttle_rate", 0)
         fragment_size = msg.get("fragment_size", None)
-        queue_length = msg.get("queue_length", 0)
+        queue_length = msg.get("depth", 0)
         reliability = msg.get("qos_reliability", None)
         durability = msg.get("qos_durability", None)
 
         self._subscriptions[sid] = SubscriptionInfo(
-            self.client,self._msg_callback, sid, topic,
-             msg_type, throttle_rate, queue_length, durability, reliability)
+            self.client, self._msg_callback, sid, topic,
+            msg_type, throttle_rate, queue_length, durability, reliability)
 
         self.client.log_info(f"Subscribed to '{topic}'.", sid)
 
@@ -164,7 +148,7 @@ class Subscribe(Cap):
         if sid in self._subscriptions:
             self._dispose_subscription(self._subscriptions[sid])
             del self._subscriptions[sid]
-            
+
     def _dispose_subscription(self, sub: SubscriptionInfo):
         sub.dispose()
         self.client.log_info(f"Unsubscribed from '{sub.topic}'.", sub.id)
