@@ -237,7 +237,7 @@ def _get_action_msg_class(typestring: str, subname: str, cache):
     action = parts[-1].split('_')
     
     actionName = action[0]
-    typeName = 'Feedback' if action[1] == 'FeedbackMessage' else action[1]
+    typeName = action[1]
     modname = parts[0]
 
     norm_typestring = modname + "/" + actionName + "_" + typeName
@@ -249,7 +249,7 @@ def _get_action_msg_class(typestring: str, subname: str, cache):
 
     # Load the class
     actionCls = _load_class(modname, subname, actionName)
-    cls = getattr(actionCls, typeName)
+    cls = getattr(actionCls.Impl, typeName)
 
     # Cache the class for both the regular and normalized typestring
     _add_to_cache(cache, typestring, cls)
