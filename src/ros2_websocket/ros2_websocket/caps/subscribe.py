@@ -1,13 +1,11 @@
 
-import asyncio
 from functools import partial
 from time import time
-from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy
+from rclpy.qos import QoSProfile
 from ros2_websocket.cap import Cap
 from ros2_websocket.client import Client
 from ros2_websocket.internal.message_conversion import extract_values, msg_class_type_repr
 import ros2_websocket.internal.ros_loader as ros_loader
-
 
 class SubscriptionInfo:
     def __init__(self, client: Client, cb,
@@ -44,21 +42,25 @@ class SubscriptionInfo:
         # to provide sane defaults. For more information, see:
         # - https://docs.ros.org/en/rolling/Concepts/About-Quality-of-Service-Settings.html
         # - https://github.com/RobotWebTools/rosbridge_suite/issues/551
+        # qos = QoSProfile(
+        #     depth=queue_size,
+        #     durability=DurabilityPolicy.TRANSIENT_LOCAL,
+        #     reliability=ReliabilityPolicy.RELIABLE,
+        # )
+
+        # infos = client.node.get_publishers_info_by_topic(topic)
+        # if any(pub.qos_profile.durability == DurabilityPolicy.TRANSIENT_LOCAL for pub in infos):
+        #     qos.durability = DurabilityPolicy.TRANSIENT_LOCAL
+        # if any(pub.qos_profile.reliability == ReliabilityPolicy.BEST_EFFORT for pub in infos):
+        #     qos.reliability = ReliabilityPolicy.BEST_EFFORT
+
         qos = QoSProfile(
-            depth=queue_size,
-            durability=DurabilityPolicy.TRANSIENT_LOCAL,
-            reliability=ReliabilityPolicy.RELIABLE,
+            depth=queue_size
         )
 
-        infos = client.node.get_publishers_info_by_topic(topic)
-        if any(pub.qos_profile.durability == DurabilityPolicy.TRANSIENT_LOCAL for pub in infos):
-            qos.durability = DurabilityPolicy.TRANSIENT_LOCAL
-        if any(pub.qos_profile.reliability == ReliabilityPolicy.BEST_EFFORT for pub in infos):
-            qos.reliability = ReliabilityPolicy.BEST_EFFORT
-
-        if durability != None:
+        if durability is not None:
             qos.durability = durability
-        if reliability != None:
+        if reliability is not None:
             qos.reliability = reliability
 
         self.id = sid
@@ -68,7 +70,7 @@ class SubscriptionInfo:
 
         self._client = client
         self._handle = client.node.create_subscription(
-            msg_class, topic, partial(cb, self), qos_profile=qos)
+            msg_class, topic, partial(cb, self), qos_profile = qos)
 
     def dispose(self):
         self._client.node.destroy_subscription(self._handle)
@@ -111,8 +113,7 @@ class Subscribe(Cap):
             "msg": extract_values(msg)
         }
 
-        self.client.event_loop.call_soon_threadsafe(lambda:
-                                                    asyncio.create_task(self._send_to_client(info.id, json)))
+        self.client.run_in_websocket_loop(self._send_to_client(info.id, json))
 
     async def _send_to_client(self, sid, json):
         try:

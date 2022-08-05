@@ -29,6 +29,13 @@ class Client:
 
         self._conn = conn
 
+    def run_in_main_loop(self, coroutine_or_callback):
+        return self.node.executor.create_task(coroutine_or_callback)
+
+    def run_in_websocket_loop(self, coroutine):
+        return self.event_loop.call_soon_threadsafe(
+            lambda:self.event_loop.create_task(coroutine))
+
     def register_operation(self, opcode: str, handler):
         """Register a handler for an opcode
         Keyword arguments:
