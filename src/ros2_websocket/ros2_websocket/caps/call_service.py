@@ -7,6 +7,9 @@ from ros2_websocket.cap import Cap
 from ros2_websocket.internal.message_conversion import populate_instance, extract_values
 from ros2_websocket.internal.ros_loader import get_service_class, get_service_request_instance
 
+class ServiceNotReadyException(Exception):
+    def __init__(self, servicename):
+        Exception.__init__(self, "Service %s is not ready." % servicename)
 
 class InvalidServiceException(Exception):
     def __init__(self, servicename):
@@ -119,6 +122,9 @@ class CallService(Cap):
         args_to_service_request_instance(service, inst, args)
 
         client = self.client.node.create_client(service_class, service)
+        if not client.service_is_ready():
+            raise ServiceNotReadyException(service)
+
         fut = client.call_async(inst)
 
         try:
@@ -140,7 +146,9 @@ class CallService(Cap):
 
             return json_response
         finally:
-            self.client.node.destroy_client(client)
+            self.client.run_in_main_loop(
+                lambda: self.client.node.destroy_client(client))
+            
 
     async def _success(self, cid, service, message):
         outgoing_message = {

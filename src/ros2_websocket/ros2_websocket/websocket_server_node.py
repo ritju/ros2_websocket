@@ -28,9 +28,9 @@ class WebsocketServerNode(Node):
         self._id = 1
         self._port = self.declare_parameter("port", 9090).value
         self._host = self.declare_parameter("host", "").value
-        self._default_callback_group = ReentrantCallbackGroup()
+        #self._default_callback_group = ReentrantCallbackGroup()
 
-        #self.create_timer(10, self._timer_callback)
+        self.create_timer(30, self._timer_callback)
         self._start_ws_server()
 
     def _timer_callback(self):
