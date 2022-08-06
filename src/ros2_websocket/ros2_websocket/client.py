@@ -1,9 +1,8 @@
 import asyncio
 import json
-import signal
-from uuid import uuid4
 from websockets import WebSocketServerProtocol
 from rclpy.node import Node
+import rclpy.client
 
 
 def is_number(s):
@@ -34,7 +33,7 @@ class Client:
 
     def run_in_websocket_loop(self, coroutine):
         return self.event_loop.call_soon_threadsafe(
-            lambda:self.event_loop.create_task(coroutine))
+            lambda: self.event_loop.create_task(coroutine))
 
     def register_operation(self, opcode: str, handler):
         """Register a handler for an opcode
@@ -119,6 +118,19 @@ class Client:
             await self.operations[op](msg)
         except Exception as exc:
             self.log_error(f"{op}: {str(exc)}", mid)
+
+    async def create_client_async(
+            self,
+            srv_type,
+            srv_name: str) -> rclpy.client.Client:
+
+        client = None
+
+        def run():
+            nonlocal client
+            client = self.node.create_client(srv_type, srv_name)
+        await self.node.executor.create_task(run)
+        return client
 
     async def dispose(self):
         for cap in self.capabilities:

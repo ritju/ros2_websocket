@@ -7,6 +7,7 @@ from ros2_websocket.client import Client
 from ros2_websocket.internal.message_conversion import extract_values, msg_class_type_repr
 import ros2_websocket.internal.ros_loader as ros_loader
 
+
 class SubscriptionInfo:
     def __init__(self, client: Client, cb,
                  sid: str, topic: str, msg_type, throttle_rate: int,
@@ -69,11 +70,15 @@ class SubscriptionInfo:
         self.last_send_time = time()
 
         self._client = client
-        self._handle = client.node.create_subscription(
-            msg_class, topic, partial(cb, self), qos_profile = qos)
+
+        def subscribe():
+            self._handle = client.node.create_subscription(
+                msg_class, topic, partial(cb, self), qos_profile=qos)
+        client.run_in_main_loop(subscribe)
 
     def dispose(self):
-        self._client.node.destroy_subscription(self._handle)
+        self._client.run_in_main_loop(
+            lambda: self._client.node.destroy_subscription(self._handle))
 
 
 class Subscribe(Cap):

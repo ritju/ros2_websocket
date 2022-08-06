@@ -7,9 +7,11 @@ from ros2_websocket.cap import Cap
 from ros2_websocket.internal.message_conversion import populate_instance, extract_values
 from ros2_websocket.internal.ros_loader import get_service_class, get_service_request_instance
 
+
 class ServiceNotReadyException(Exception):
     def __init__(self, servicename):
         Exception.__init__(self, "Service %s is not ready." % servicename)
+
 
 class InvalidServiceException(Exception):
     def __init__(self, servicename):
@@ -26,6 +28,12 @@ class InvalidServiceResultException(Exception):
     def __init__(self, servicename, result):
         Exception.__init__(
             self, f"Service call to '{servicename}' returned invalid result: {result}.")
+
+
+class ServiceCallAbortedException(Exception):
+    def __init__(self, servicename):
+        Exception.__init__(self,
+                           "Service call to '%s' was aborted." % servicename)
 
 
 def trim_servicename(service):
@@ -58,18 +66,23 @@ def extract_id(service, cid):
 class CallService(Cap):
     call_service_msg_fields = [
         (True, "service", str),
-        (False, "type", (str,type(None))),
+        (False, "type", (str, type(None))),
         (False, "fragment_size", (int, type(None))),
         (False, "compression", str),
-        (False, "timeout", (float,int)),
+        (False, "timeout", (float, int)),
     ]
 
     def __init__(self, client: Client):
         # Call superclass constructor
         Cap.__init__(self, client)
 
+        self._shutdownSignal = asyncio.Future()
+
         # Register the operations that this capability provides
         client.register_operation("call_service", self.call_service)
+
+    async def dispose(self):
+        self._shutdownSignal.set_result(None)
 
     async def call_service(self, message: dict):
         # Pull out the ID
@@ -90,14 +103,14 @@ class CallService(Cap):
         cid = extract_id(service, cid)
 
         try:
-            response = await self._invoke(service,type, args, timeout)
+            response = await self._invoke(cid, service, type, args, timeout)
         except Exception as err:
             await self._failure(cid, service, err)
             return
 
         await self._success(cid, service, response)
 
-    async def _invoke(self, service: str, service_type:str, args: list, timeout: int):
+    async def _invoke(self, cid: str, service: str, service_type: str, args: list, timeout: int):
         # Given the service name, fetch the type and class of the service,
         # and a request instance
 
@@ -121,21 +134,37 @@ class CallService(Cap):
         # Populate the instance with the provided args
         args_to_service_request_instance(service, inst, args)
 
-        client = self.client.node.create_client(service_class, service)
-        if not client.service_is_ready():
-            raise ServiceNotReadyException(service)
-
-        fut = client.call_async(inst)
-
+        client = None
+        fut = None
         try:
-            if timeout >= 0:
+            notifier = asyncio.Future()
+
+            def start_call():
+                nonlocal fut, client
                 try:
-                    await asyncio.wait_for(fut, timeout)
-                except Exception:
-                    client.remove_pending_request(fut)
-                    raise ServiceCallTimeoutException(service, timeout)
-            else:
-                await fut
+                    client = self.client.node.create_client(service_class, service)
+                    if not client.service_is_ready():
+                        raise ServiceNotReadyException(service)
+                    fut = client.call_async(inst)
+                    notifier.set_result(None)
+                except Exception as e:
+                    notifier.set_exception(e)
+            self.client.node.executor.create_task(start_call)
+            await notifier
+
+            try:
+                w = asyncio.create_task(
+                    asyncio.wait_for(fut, timeout if timeout >= 0 else None))
+                await asyncio.wait(
+                    [self._shutdownSignal, w],
+                    return_when=asyncio.FIRST_COMPLETED)
+
+                if w.done():
+                    await w
+                else:
+                    raise ServiceCallAbortedException(service)
+            except TimeoutError:
+                raise ServiceCallTimeoutException(service, timeout)
 
             result = fut.result()
             if result is not None:
@@ -148,7 +177,6 @@ class CallService(Cap):
         finally:
             self.client.run_in_main_loop(
                 lambda: self.client.node.destroy_client(client))
-            
 
     async def _success(self, cid, service, message):
         outgoing_message = {
