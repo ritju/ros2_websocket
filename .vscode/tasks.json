@@ -290,6 +290,12 @@
             "type": "shell",
             "command": "sudo apt-get update && rosdepc update && rosdepc install --from-paths src --ignore-src -y",
             "problemMatcher": []
+        },
+        {
+            "label": "List Package Dependencies",
+            "type": "shell",
+            "command": "rosdepc install --reinstall --simulate --from-path src --ignore-src",
+            "problemMatcher": []
         }
     ],
     "inputs": [
