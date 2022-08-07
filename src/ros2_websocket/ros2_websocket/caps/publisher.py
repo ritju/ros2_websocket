@@ -69,7 +69,8 @@ class PublisherContext:
         self._handle.publish(inst)
 
     def dispose(self):
-        self._client.node.destroy_publisher(self._handle)
+        self._client.run_in_main_loop(
+            lambda: self._client.node.destroy_publisher(self._handle))
 
 
 class Publisher(Cap):

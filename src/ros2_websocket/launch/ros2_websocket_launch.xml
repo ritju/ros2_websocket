@@ -6,12 +6,12 @@
     <arg name="services_glob" default="" />
     <arg name="params_glob" default="" />
 
-    <node name="ros2_websocket" pkg="ros2_websocket" exec="main" output="screen">
+    <node pkg="ros2_websocket" exec="main" output="screen">
         <param name="port" value="$(var port)"/>
         <param name="address" value="$(var host)"/>
     </node>
 
-    <node name="rosapi" pkg="rosapi" exec="rosapi_node">
+    <node pkg="rosapi" exec="rosapi_node">
         <param name="topics_glob" value="$(var topics_glob)"/>
         <param name="services_glob" value="$(var services_glob)"/>
         <param name="params_glob" value="$(var params_glob)"/>

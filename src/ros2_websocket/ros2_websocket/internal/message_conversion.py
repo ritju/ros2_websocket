@@ -294,8 +294,8 @@ def _to_list_inst(msg, rostype, roottype, inst, stack):
         return []
 
     # Special mappings for numeric types https://design.ros2.org/articles/idl_interface_definition.html
-    if isinstance(inst, array.array) or isinstance(inst, np.ndarray):
-        return msg
+    # if isinstance(inst, array.array) or isinstance(inst, np.ndarray):
+    #     return msg
 
     # Remove the list indicators from the rostype
     try:
@@ -336,7 +336,8 @@ def _to_object_inst(msg, rostype, roottype, inst, stack):
 
     return inst
 
-def _normalize_if_action_msg(typestring:str):
+
+def _normalize_if_action_msg(typestring: str):
     if typestring.endswith("_Feedback"):
         parts = typestring.split("_")
         parts[-1] = "FeedbackMessage"

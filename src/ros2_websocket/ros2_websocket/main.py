@@ -1,6 +1,7 @@
 import rclpy
 from ros2_websocket.websocket_server_node import WebsocketServerNode
 
+
 def main():
     rclpy.init()
     service = WebsocketServerNode()
@@ -10,6 +11,7 @@ def main():
         rclpy.shutdown()
     finally:
         service.shutdown()
+
 
 if __name__ == '__main__':
     main()

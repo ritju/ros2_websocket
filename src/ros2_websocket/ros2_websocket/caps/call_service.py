@@ -163,7 +163,7 @@ class CallService(Cap):
                     await w
                 else:
                     raise ServiceCallAbortedException(service)
-            except TimeoutError:
+            except:
                 raise ServiceCallTimeoutException(service, timeout)
 
             result = fut.result()
