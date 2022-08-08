@@ -56,7 +56,11 @@ class PublisherContext:
             publisher_qos.reliability = reliability
 
         self._msg_class = msg_class
-        self._handle = client.node.create_publisher(msg_class, topic, qos_profile=publisher_qos)
+
+        def create():
+            self._handle = client.node.create_publisher(
+                msg_class, topic, qos_profile=publisher_qos)
+        client.run_in_main_loop(create)
 
     def publish(self, msg):
         # Create a message instance
@@ -66,7 +70,8 @@ class PublisherContext:
         populate_instance(msg, inst)
 
         # Publish the message
-        self._handle.publish(inst)
+        self._client.run_in_main_loop(
+            lambda: self._handle.publish(inst))
 
     def dispose(self):
         self._client.run_in_main_loop(
