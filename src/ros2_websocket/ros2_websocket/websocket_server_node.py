@@ -25,14 +25,19 @@ class WebsocketServerNode(Node):
         self._port = self.declare_parameter("port", 9090).value
         self._host = self.declare_parameter("host", "").value
 
+        if not "_publishers" in self.__dict__:
+            self._publishers = self._Node__publishers
+            self._subscriptions = self._Node__subscriptions
+            self._clients = self._Node__clients
+
         self.create_timer(30, self._timer_callback)
         self._start_ws_server()
 
     def _timer_callback(self):
         self.get_logger().info(
-            f"puslishers: {len(self._Node__publishers)}, "
-            f"subscriptions: {len(self._Node__subscriptions)}, "
-            f"service_clients: {len(self._Node__clients)}")
+            f"puslishers: {len(self._publishers)}, "
+            f"subscriptions: {len(self._subscriptions)}, "
+            f"service_clients: {len(self._clients)}")
 
     def _start_ws_server(self):
         Thread(None, lambda: asyncio.run(self._accept())).start()
