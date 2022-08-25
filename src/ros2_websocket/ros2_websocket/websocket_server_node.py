@@ -20,7 +20,7 @@ class WebsocketServerNode(Node):
     def __init__(self):
         super().__init__("websocket_bridge")
 
-        self._clients = {}
+        self._ws_clients = {}
         self._id = 1
         self._port = self.declare_parameter("port", 9090).value
         self._host = self.declare_parameter("host", "").value
@@ -44,14 +44,14 @@ class WebsocketServerNode(Node):
 
     async def _create_client(self, websocket: WebSocketServerProtocol, uri):
         cli = Client(str(self._id), self, websocket, self.supported_capabilities)
-        self._clients[cli.id] = cli
+        self._ws_clients[cli.id] = cli
 
         self._id = self._id + 1
 
         try:
             await cli.run()
         finally:
-            del self._clients[cli.id]
+            del self._ws_clients[cli.id]
 
     def shutdown(self):
         self.event_loop.call_soon_threadsafe(self.event_loop.stop)
