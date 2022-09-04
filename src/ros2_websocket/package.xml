@@ -9,7 +9,8 @@
 
   <depend>python3-websockets</depend>
   <exec_depend>rosapi</exec_depend>
-  
+  <depend>roslib_protocol_msgs</depend>
+
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>
   <test_depend>ament_pep257</test_depend>
