@@ -73,8 +73,10 @@ class SubscriptionInfo:
         self._client = client
 
         def subscribe():
+            # Subscribing raw message will cause rcl_take_serialized_message to fail on foxy
+            # So we take non-raw messages here for now
             self._handle = client.node.create_subscription(
-                msg_class, topic, partial(cb, self), qos_profile=qos, raw=True)
+                msg_class, topic, partial(cb, self), qos_profile=qos, raw=False)
         client.run_in_main_loop(subscribe)
 
     def dispose(self):
