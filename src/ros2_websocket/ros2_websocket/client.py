@@ -3,6 +3,7 @@ import json
 from websockets import WebSocketServerProtocol
 from rclpy.node import Node
 import rclpy.client
+from ros2_websocket.protocol_message import ProtocolMessage
 
 
 def is_number(s):
@@ -35,7 +36,7 @@ class Client:
         return self.event_loop.call_soon_threadsafe(
             lambda: self.event_loop.create_task(coroutine))
 
-    def register_operation(self, opcode: str, handler):
+    def register_operation(self, opcode: int, handler):
         """Register a handler for an opcode
         Keyword arguments:
         opcode  -- the opcode to register this handler for
@@ -43,7 +44,7 @@ class Client:
         """
         self.operations[opcode] = handler
 
-    def unregister_operation(self, opcode: str):
+    def unregister_operation(self, opcode: int):
         """Unregister a handler for an opcode
         Keyword arguments:
         opcode -- the opcode to unregister the handler for
@@ -66,7 +67,7 @@ class Client:
         try:
             async for msg in self._conn:
                 try:
-                    req = json.loads(msg)
+                    req = ProtocolMessage(msg)
                 except Exception as err:
                     self.log_warn(f"Unable to decode message: {str(err)}.")
                     continue
@@ -80,44 +81,14 @@ class Client:
             await self.dispose()
 
     async def send(self, msg):
-        await self._conn.send(json.dumps(msg).encode('utf-8'))
+        await self._conn.send(msg)
 
-    async def _process_request(self, msg: dict):
-        # process fields JSON-message object that "control" rosbridge
-        mid = None
-        if "id" in msg:
-            mid = msg["id"]
-        if "op" not in msg:
-            if "receiver" in msg:
-                self.log_error("Received a rosbridge v1.0 message.")
-            else:
-                self.log_error(
-                    f"Received a message without an op.  All messages require 'op' field with value one of: {list(self.operations.keys())}.",
-                    mid,
-                )
-            return
-        op = msg["op"]
-        if op not in self.operations:
-            self.log_error(
-                f"Unknown operation: {op}.  Allowed operations: {list(self.operations.keys())}",
-                mid,
-            )
-            return
-        # this way a client can change/overwrite it's active values anytime by just including parameter field in any message sent to rosbridge
-        #  maybe need to be improved to bind parameter values to specific operation..
-        if "fragment_size" in msg.keys():
-            self.fragment_size = msg["fragment_size"]
-            # print "fragment size set to:", self.fragment_size
-        if "message_interval" in msg.keys() and is_number(msg["message_interval"]):
-            self.delay_between_messages = msg["message_interval"]
-        if "png" in msg.keys():
-            self.png = msg["msg"]
-
+    async def _process_request(self, msg: ProtocolMessage):
         # now try to pass message to according operation
         try:
-            await self.operations[op](msg)
+            await self.operations[msg.header.op_code](msg)
         except Exception as exc:
-            self.log_error(f"{op}: {str(exc)}", mid)
+            self.log_error(f"{msg.header.op_code}: {str(exc)}", msg.id)
 
     async def create_client_async(
             self,

@@ -3,15 +3,20 @@ from functools import partial
 from time import time
 from rclpy.qos import QoSProfile
 from ros2_websocket.cap import Cap
+from ros2_websocket.exceptions import TopicNotEstablishedException, TypeConflictException
 from ros2_websocket.client import Client
 from ros2_websocket.internal.message_conversion import extract_values, msg_class_type_repr
 import ros2_websocket.internal.ros_loader as ros_loader
+from ros2_websocket.protocol_message import OutgoingProtocolMessage, ProtocolMessage
+
+import roslib_protocol_msgs.msg as prot
 
 
 class SubscriptionInfo:
     def __init__(self, client: Client, cb,
                  sid: str, topic: str, msg_type, throttle_rate: int,
                  queue_size: int, durability: int, reliability: int) -> None:
+
         topics_names_and_types = dict(client.node.get_topic_names_and_types())
         topic_type = topics_names_and_types.get(topic)
 
@@ -23,10 +28,6 @@ class SubscriptionInfo:
             if len(topic_type) > 1:
                 client.log_warn(f"More than one topic type detected: {topic_type}", sid)
             topic_type = topic_type[0]
-
-        # Use the established topic type if none was specified
-        if msg_type is None:
-            msg_type = topic_type
 
         # Load the message class, propagating any exceptions from bad msg types
         msg_class = ros_loader.get_message_class(msg_type)
@@ -73,7 +74,7 @@ class SubscriptionInfo:
 
         def subscribe():
             self._handle = client.node.create_subscription(
-                msg_class, topic, partial(cb, self), qos_profile=qos)
+                msg_class, topic, partial(cb, self), qos_profile=qos, raw=True)
         client.run_in_main_loop(subscribe)
 
     def dispose(self):
@@ -82,26 +83,13 @@ class SubscriptionInfo:
 
 
 class Subscribe(Cap):
-    subscribe_msg_fields = [
-        (True, "id", str),
-        (True, "topic", str),
-        (False, "type", str),
-        (False, "throttle_rate", int),
-        (False, "fragment_size", int),
-        (False, "depth", int),
-        (False, "qos_reliability", (int, type(None))),
-        (False, "qos_durability", (int, type(None))),
-        (False, "compression", str),
-    ]
-    unsubscribe_msg_fields = [(True, "id", str)]
-
     def __init__(self, client: Client):
         # Call superclass constructor
         Cap.__init__(self, client)
 
         # Register the operations that this capability provides
-        client.register_operation("subscribe", self.subscribe)
-        client.register_operation("unsubscribe", self.unsubscribe)
+        client.register_operation(prot.Header.OP_CODE_SUBSCRIBE, self.subscribe)
+        client.register_operation(prot.Header.OP_CODE_UNSUBSCRIBE, self.unsubscribe)
 
         self._subscriptions = {}
 
@@ -110,38 +98,28 @@ class Subscribe(Cap):
         if info.throttle_rate > 0 and now - info.last_send_time < info.throttle_rate:
             return
         info.last_send_time = now
+        self.client.run_in_websocket_loop(self._send_to_client(info.id, msg))
 
-        json = {
-            "op": "publish",
-            "id": info.id,
-            "topic": info.topic,
-            "msg": extract_values(msg)
-        }
-
-        self.client.run_in_websocket_loop(self._send_to_client(info.id, json))
-
-    async def _send_to_client(self, sid, json):
+    async def _send_to_client(self, sid, msg):
         try:
-            await self.client.send(json)
+            m = OutgoingProtocolMessage(sid, prot.Publish(), msg)
+            await self.client.send(m.encode())
         except Exception as err:
             self.client.log_warn(f'Unable to send topic message to client: {str(err)}', sid)
 
-    async def subscribe(self, msg):
-        # Check the args
-        self.basic_type_check(msg, self.subscribe_msg_fields)
-
+    async def subscribe(self, msg: ProtocolMessage):
         # Pull out the ID
-        sid = msg["id"]
+        body: prot.Subscribe = msg.body
+        sid = msg.id
 
         # Make the subscription
-        topic = msg["topic"]
+        topic = body.topic
 
-        msg_type = msg.get("type", None)
-        throttle_rate = msg.get("throttle_rate", 0)
-        fragment_size = msg.get("fragment_size", None)
-        queue_length = msg.get("depth", 0)
-        reliability = msg.get("qos_reliability", None)
-        durability = msg.get("qos_durability", None)
+        msg_type = body.type
+        throttle_rate = body.throttle_rate
+        queue_length = body.qos.depth
+        reliability = body.qos.reliability
+        durability = body.qos.durability
 
         self._subscriptions[sid] = SubscriptionInfo(
             self.client, self._msg_callback, sid, topic,
@@ -149,8 +127,8 @@ class Subscribe(Cap):
 
         self.client.log_info(f"Subscribed to '{topic}'.", sid)
 
-    async def unsubscribe(self, msg):
-        sid = msg.get("id", None)
+    async def unsubscribe(self, msg: ProtocolMessage):
+        sid = msg.id
         if sid in self._subscriptions:
             self._dispose_subscription(self._subscriptions[sid])
             del self._subscriptions[sid]

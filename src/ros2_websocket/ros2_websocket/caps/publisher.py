@@ -6,7 +6,9 @@ from ros2_websocket.exceptions import TopicNotEstablishedException, TypeConflict
 from ros2_websocket.internal import ros_loader
 from ros2_websocket.internal.message_conversion import msg_class_type_repr, populate_instance
 from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy
+from ros2_websocket.protocol_message import ProtocolMessage
 
+import roslib_protocol_msgs.msg as prot
 
 class PublisherContext:
     def __init__(self, client: Client, id: str, topic: str, msg_type: str,
@@ -28,10 +30,6 @@ class PublisherContext:
             if len(topic_type) > 1:
                 self.client.log_warn(f"More than one topic type detected: {topic_type}")
             topic_type = topic_type[0]
-
-        # Use the established topic type if none was specified
-        if msg_type is None:
-            msg_type = topic_type
 
         # Load the message class, propagating any exceptions from bad msg types
         msg_class = ros_loader.get_message_class(msg_type)
@@ -63,15 +61,8 @@ class PublisherContext:
         client.run_in_main_loop(create)
 
     def publish(self, msg):
-        # Create a message instance
-        inst = self._msg_class()
-
-        # Populate the instance, propagating any exceptions that may be thrown
-        populate_instance(msg, inst)
-
-        # Publish the message
         self._client.run_in_main_loop(
-            lambda: self._handle.publish(inst))
+            lambda: self._handle.publish(msg))
 
     def dispose(self):
         self._client.run_in_main_loop(
@@ -79,38 +70,26 @@ class PublisherContext:
 
 
 class Publisher(Cap):
-    advertise_msg_fields = [
-        (True, "topic", str),
-        (True, "id", str),
-        (True, "type", str),
-        (False, "depth", int),
-        (False, "qos_reliability", (int, type(None))),
-        (False, "qos_durability", (int, type(None)))
-    ]
-
-    unadvertise_msg_fields = [(True, "id", str)]
-    publish_msg_fields = [(True, "id", str)]
-
     def __init__(self, client):
         # Call superclass constructor
         Cap.__init__(self, client)
 
         # Register the operations that this capability provides
-        client.register_operation("advertise", self.advertise)
-        client.register_operation("unadvertise", self.unadvertise)
-        client.register_operation("publish", self.publish)
+        client.register_operation(prot.Header.OP_CODE_ADVERTISE, self.advertise)
+        client.register_operation(prot.Header.OP_CODE_UNADVERTISE, self.unadvertise)
+        client.register_operation(prot.Header.OP_CODE_PUBLISH, self.publish)
 
         # Initialize class variables
         self._publishers = {}
 
-    async def advertise(self, msg: dict):
-        self.basic_type_check(msg, self.advertise_msg_fields)
-        id = msg["id"]
-        topic = msg["topic"]
-        msg_type = msg["type"]
-        reliability = msg.get("qos_reliability", None)
-        durability = msg.get("qos_durability", None)
-        queue_size = msg.get("depth", 0)
+    async def advertise(self, msg: ProtocolMessage):
+        body : prot.Advertise = msg.body
+        id = msg.id
+        topic = body.topic
+        msg_type = body.type
+        reliability = body.qos.reliability
+        durability = body.qos.durability
+        queue_size = body.qos.depth
 
         if id not in self._publishers:
             self._publishers[id] = PublisherContext(self.client,
@@ -120,21 +99,18 @@ class Publisher(Cap):
             self.client.log_warn(
                 f"Unable to advertise topic '{topic}', duplicate publisher id.", id)
 
-    async def unadvertise(self, msg: dict):
-        id = msg["id"]
-        if msg["id"] in self._publishers:
+    async def unadvertise(self, msg: ProtocolMessage):
+        id = msg.id
+        if id in self._publishers:
             self._dispose_publihser(self._publishers[id])
             del self._publishers[id]
         else:
             self.client.log_warn(f"Unable to unadvertise topic, unknown publisher id.", id)
 
-    async def publish(self, msg: dict):
-        # Do basic type checking
-        self.basic_type_check(msg, self.publish_msg_fields)
-
-        id = msg["id"]
+    async def publish(self, msg: ProtocolMessage):
+        id = msg.id
         if id in self._publishers:
-            m = msg.get("msg", {})
+            m = msg.trailer
             self._publishers[id].publish(m)
         else:
             self.client.log_warn(f"Unable to publish message, unknown publisher id.", id)

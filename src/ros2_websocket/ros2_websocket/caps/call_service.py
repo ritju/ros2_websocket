@@ -1,11 +1,16 @@
+from ast import arg
 import asyncio
 from time import time
+import uuid
 from rclpy.expand_topic_name import expand_topic_name
 
 from ros2_websocket.client import Client
 from ros2_websocket.cap import Cap
 from ros2_websocket.internal.message_conversion import populate_instance, extract_values
 from ros2_websocket.internal.ros_loader import get_service_class, get_service_request_instance
+from ros2_websocket.protocol_message import OutgoingProtocolMessage, ProtocolMessage
+
+import roslib_protocol_msgs.msg as prot
 
 
 class ServiceNotReadyException(Exception):
@@ -64,14 +69,6 @@ def extract_id(service, cid):
 
 
 class CallService(Cap):
-    call_service_msg_fields = [
-        (True, "service", str),
-        (False, "type", (str, type(None))),
-        (False, "fragment_size", (int, type(None))),
-        (False, "compression", str),
-        (False, "timeout", (float, int)),
-    ]
-
     def __init__(self, client: Client):
         # Call superclass constructor
         Cap.__init__(self, client)
@@ -79,60 +76,34 @@ class CallService(Cap):
         self._shutdownSignal = asyncio.Future()
 
         # Register the operations that this capability provides
-        client.register_operation("call_service", self.call_service)
+        client.register_operation(prot.Header.OP_CODE_CALL_SERVICE, self.call_service)
 
     async def dispose(self):
         self._shutdownSignal.set_result(None)
 
-    async def call_service(self, message: dict):
+    async def call_service(self, message: ProtocolMessage):
         # Pull out the ID
-        cid = message.get("id", None)
-
-        # Typecheck the args
-        self.basic_type_check(message, self.call_service_msg_fields)
+        cid = message.id
+        body: prot.CallService = message.body
 
         # Extract the args
-        service = message["service"]
-        type = message.get("type", None)
-        timeout = message.get("timeout", 60.0)
-        fragment_size = message.get("fragment_size", None)
-        compression = message.get("compression", "none")
-        args = message.get("args", [])
-
-        # Check for deprecated service ID, eg. /rosbridge/topics#33
-        cid = extract_id(service, cid)
+        service = body.service
+        type = body.type
+        timeout = body.timeout
 
         try:
-            response = await self._invoke(cid, service, type, args, timeout)
+            service_class = get_service_class(type)
+            args = message.decode_trailer(service_class.Request)
+            response = await self._invoke(service, service_class, args, timeout)
         except Exception as err:
-            await self._failure(cid, service, err)
+            await self._failure(cid, err)
             return
 
-        await self._success(cid, service, response)
+        await self._success(cid, response)
 
-    async def _invoke(self, cid: str, service: str, service_type: str, args: list, timeout: int):
+    async def _invoke(self, service: str, service_class, args, timeout: int):
         # Given the service name, fetch the type and class of the service,
         # and a request instance
-
-        if service_type is None:
-            # This should be equivalent to rospy.resolve_name.
-            service = expand_topic_name(service, self.client.node.get_name(),
-                                        self.client.node.get_namespace())
-
-            service_names_and_types = dict(self.client.node.get_service_names_and_types())
-            service_type = service_names_and_types.get(service)
-            if service_type is None:
-                raise InvalidServiceException(service)
-            # service_type is a tuple of types at this point; only one type is supported.
-            if len(service_type) > 1:
-                self.client.log_warn(f"More than one service type detected: {service_type}")
-            service_type = service_type[0]
-
-        service_class = get_service_class(service_type)
-        inst = get_service_request_instance(service_type)
-
-        # Populate the instance with the provided args
-        args_to_service_request_instance(service, inst, args)
 
         client = None
         fut = None
@@ -145,7 +116,7 @@ class CallService(Cap):
                     client = self.client.node.create_client(service_class, service)
                     if not client.service_is_ready():
                         raise ServiceNotReadyException(service)
-                    fut = client.call_async(inst)
+                    fut = client.call_async(args)
                     notifier.set_result(None)
                 except Exception as e:
                     notifier.set_exception(e)
@@ -168,37 +139,24 @@ class CallService(Cap):
 
             result = fut.result()
             if result is not None:
-                # Turn the response into JSON and pass to the callback
-                json_response = extract_values(result)
+                return result
             else:
                 raise InvalidServiceResultException(service, result)
-
-            return json_response
         finally:
             self.client.run_in_main_loop(
                 lambda: self.client.node.destroy_client(client))
 
-    async def _success(self, cid, service, message):
-        outgoing_message = {
-            "op": "service_response",
-            "service": service,
-            "values": message,
-            "result": True,
-        }
-        if cid is not None:
-            outgoing_message["id"] = cid
-        # TODO: fragmentation, compression
-        await self.client.send(outgoing_message)
+    async def _success(self, cid, message):
+        body = prot.ServiceResponse()
+        body.result = True
+        outgoing_message = OutgoingProtocolMessage(cid, body, message)
 
-    async def _failure(self, cid, service, exc):
+        await self.client.send(outgoing_message.encode())
+
+    async def _failure(self, cid, exc):
         self.client.log_error("call_service %s: %s" % (type(exc).__name__, str(exc)), cid)
         # send response with result: false
-        outgoing_message = {
-            "op": "service_response",
-            "service": service,
-            "values": str(exc),
-            "result": False,
-        }
-        if cid is not None:
-            outgoing_message["id"] = cid
-        await self.client.send(outgoing_message)
+        body = prot.ServiceResponse()
+        body.result = False
+        outgoing_message = OutgoingProtocolMessage(cid, body, None)
+        await self.client.send(outgoing_message.encode())
